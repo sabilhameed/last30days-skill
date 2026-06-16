@@ -1,0 +1,13 @@
+{
+  "_comment": "Upcoming fixtures to research. odds = reward points for a correct call (lower = favorite, higher = bigger payout for the upset).",
+  "fixtures": [
+    {"home": "France",     "away": "Senegal",  "home_win": 46,  "draw": 128, "away_win": 153},
+    {"home": "Iraq",       "away": "Norway",   "home_win": 178, "draw": 144, "away_win": 30},
+    {"home": "Argentina",  "away": "Algeria",  "home_win": 43,  "draw": 129, "away_win": 159},
+    {"home": "Austria",    "away": "Jordan",   "home_win": 38,  "draw": 136, "away_win": 163},
+    {"home": "Portugal",   "away": "DR Congo", "home_win": 34,  "draw": 140, "away_win": 170},
+    {"home": "England",    "away": "Croatia",  "home_win": 59,  "draw": 119, "away_win": 133},
+    {"home": "Ghana",      "away": "Panama",   "home_win": 73,  "draw": 113, "away_win": 116},
+    {"home": "Uzbekistan", "away": "Colombia", "home_win": 157, "draw": 130, "away_win": 44}
+  ]
+}
