@@ -35,6 +35,10 @@ class ResearchAngle:
     signal_focus: str
     subreddits: tuple[str, ...] = ()
     x_related: tuple[str, ...] = ()
+    # Force a specific source set (e.g. social sources gated on a ScrapeCreators key).
+    search_sources: tuple[str, ...] = ()
+    # TikTok hashtags to query (without #).
+    tiktok_hashtags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -165,3 +169,7 @@ class AgentConfig:
 
     def has_anthropic_key(self) -> bool:
         return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+
+    def has_scrapecreators(self) -> bool:
+        """ScrapeCreators key unlocks TikTok / Instagram / Threads sourcing."""
+        return bool(os.environ.get("SCRAPECREATORS_API_KEY"))

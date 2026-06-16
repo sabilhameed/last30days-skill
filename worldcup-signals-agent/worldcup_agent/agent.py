@@ -84,6 +84,18 @@ def run_pipeline(cfg: AgentConfig) -> RunSummary:
     return summary
 
 
+def _slug(team: str) -> str:
+    """Turn a team name into a hashtag token: 'DR Congo' -> 'drcongo'."""
+    return "".join(ch for ch in team.lower() if ch.isalnum())
+
+
+def _fixture_hashtags(fx: Fixture) -> tuple[str, ...]:
+    """TikTok hashtags targeting both teams plus generic World Cup tags."""
+    tags = ["worldcup", "worldcup2026", _slug(fx.home), _slug(fx.away)]
+    # de-dupe while preserving order
+    return tuple(dict.fromkeys(t for t in tags if t))
+
+
 def run_fixtures(cfg: AgentConfig, fixtures: list[Fixture]) -> RunSummary:
     """Research a specific set of upcoming matches, one engine query per fixture.
 
@@ -93,6 +105,11 @@ def run_fixtures(cfg: AgentConfig, fixtures: list[Fixture]) -> RunSummary:
     store = SignalStore(cfg.db_path)
     batch_id = store.new_batch_id()
     summary = RunSummary(batch_id=batch_id, mock=cfg.mock)
+
+    # A ScrapeCreators key unlocks TikTok/Instagram/Threads — the sources that
+    # actually carry per-fixture team chatter. When present, force those sources
+    # plus the keyless ones and target each fixture's teams via hashtags.
+    use_social = cfg.has_scrapecreators()
 
     try:
         for fx in fixtures:
@@ -104,6 +121,12 @@ def run_fixtures(cfg: AgentConfig, fixtures: list[Fixture]) -> RunSummary:
                     "suspensions, lineups, form, tactical edge, market moves"
                 ),
                 subreddits=("worldcup", "soccer", "football"),
+                search_sources=(
+                    ("tiktok", "instagram", "threads", "reddit", "hackernews", "polymarket")
+                    if use_social
+                    else ()
+                ),
+                tiktok_hashtags=_fixture_hashtags(fx) if use_social else (),
             )
             print(f"[{fx.match}] running engine ({'mock' if cfg.mock else 'live'})...")
             try:

@@ -98,6 +98,10 @@ def _build_command(
         cmd.append(f"--subreddits={','.join(angle.subreddits)}")
     if angle.x_related:
         cmd.append(f"--x-related={','.join(angle.x_related)}")
+    if angle.search_sources:
+        cmd.append(f"--search={','.join(angle.search_sources)}")
+    if angle.tiktok_hashtags:
+        cmd.append(f"--tiktok-hashtags={','.join(angle.tiktok_hashtags)}")
     return cmd
 
 
