@@ -159,9 +159,20 @@ def _classify(text: str) -> SignalType:
 def extract_heuristic(
     angle: ResearchAngle, items: list[dict]
 ) -> list[PredictiveSignal]:
-    """Deterministic, no-API extractor. Coarser but always available."""
+    """Deterministic, no-API extractor. Coarser but always available.
+
+    Prediction-market items (Polymarket) get a dedicated parser that reads the
+    implied-probability movement baked into the snippet; everything else falls
+    back to keyword classification.
+    """
     signals: list[PredictiveSignal] = []
     for it in items:
+        if (it.get("source") or "").lower() == "polymarket":
+            sig = extract_polymarket(it)
+            if sig is not None:
+                signals.append(sig)
+            continue
+
         text = f"{it['title']} {it['snippet']}"
         signal_type = _classify(text)
         if signal_type == "other":
@@ -188,6 +199,108 @@ def extract_heuristic(
     return signals
 
 
+# --- Polymarket prediction-market extraction --------------------------------
+
+# Probability movement embedded in the snippet, e.g. "down 8.0% this week".
+_MOVE_RE = re.compile(
+    r"\b(up|down)\s+([0-9]+(?:\.[0-9]+)?)%\s+(today|this week|this month)\b",
+    re.IGNORECASE,
+)
+# Availability markets, e.g. "Will Neymar play in the World Cup?".
+_AVAILABILITY_RE = re.compile(
+    r"\bwill\s+(.+?)\s+(?:play|feature|start|be (?:fit|available))\b", re.IGNORECASE
+)
+# "Will <team> win ..." outcome markets.
+_WIN_RE = re.compile(r"\bwill\s+(.+?)\s+win\b", re.IGNORECASE)
+
+
+def _move_strength(pct: float) -> Strength:
+    """A bigger probability swing is a stronger market signal."""
+    if pct >= 8.0:
+        return "high"
+    if pct >= 4.0:
+        return "medium"
+    return "low"
+
+
+def extract_polymarket(item: dict) -> PredictiveSignal | None:
+    """Turn one Polymarket market into a structured signal.
+
+    Reads the probability move from the snippet (direction + magnitude +
+    timeframe) and the market subject from the title, mapping players to their
+    national teams. Availability markets ('Will X play') are typed as injury
+    signals; everything else is a betting_odds signal.
+    """
+    title = item.get("title") or ""
+    snippet = item.get("snippet") or ""
+    text = f"{title} {snippet}"
+    teams = _guess_teams(text)
+
+    move = _MOVE_RE.search(snippet)
+    direction = move.group(1).lower() if move else None
+    pct = float(move.group(2)) if move else 0.0
+    timeframe = move.group(3).lower() if move else None
+
+    # Classify the market and infer who it favors.
+    avail = _AVAILABILITY_RE.search(title)
+    win = _WIN_RE.search(title)
+    if avail:
+        signal_type: SignalType = "injury"
+        subject = avail.group(1).strip()
+        # "down" on a will-play market = less likely to feature = hurts their side.
+        favored_team = "none"
+        horizon = "tournament"
+        subject_desc = f"availability of {subject}"
+    elif win:
+        signal_type = "betting_odds"
+        subject = win.group(1).strip()
+        # "up" = market favors this team more; "down" = favors their rivals.
+        favored_team = (
+            (teams[0] if teams else subject) if direction == "up" else "none"
+        )
+        horizon = "tournament"
+        subject_desc = f"win odds for {subject}"
+    else:
+        signal_type = "betting_odds"
+        favored_team = "none"
+        horizon = "tournament"
+        subject_desc = title or "World Cup market"
+
+    # Strength comes from the size of the move; engagement is the fallback proxy.
+    if move:
+        strength = _move_strength(pct)
+        # A real-money market move is a more trustworthy signal than raw chatter.
+        confidence: Strength = "medium" if pct >= 4.0 else "low"
+        move_desc = f"implied probability {direction} {pct:g}% {timeframe}"
+    else:
+        strength = "high" if item.get("engagement", 0) >= 50 else "low"
+        confidence = "low"
+        move_desc = "active market, no recent move parsed"
+
+    return PredictiveSignal(
+        match=" vs ".join(teams[:2]) if len(teams) >= 2 else "unknown",
+        teams=teams,
+        signal_type=signal_type,
+        favored_team=favored_team,
+        edge_strength=strength,
+        confidence=confidence,
+        time_horizon=horizon,
+        rationale=f"Polymarket {subject_desc}: {move_desc} ({title}).",
+        source_item_ids=[item["item_id"]],
+    )
+
+
+# Star players mapped to their national team, so a player-only market still
+# resolves to a nation in the fallback extractor.
+_PLAYER_NATION: dict[str, str] = {
+    "Messi": "Argentina", "Neymar": "Brazil", "Vinicius": "Brazil",
+    "Mbappe": "France", "Mbappé": "France", "Kane": "England",
+    "Bellingham": "England", "Foden": "England", "Yamal": "Spain",
+    "Pedri": "Spain", "Musiala": "Germany", "Ronaldo": "Portugal",
+    "Pulisic": "USA", "Modric": "Croatia", "Lukaku": "Belgium",
+    "Haaland": "Norway", "Salah": "Egypt", "Son": "South Korea",
+}
+
 # A small roster of World Cup nations for naive team detection in the fallback.
 _NATIONS = (
     "Argentina", "Brazil", "France", "England", "Spain", "Germany", "Portugal",
@@ -202,6 +315,10 @@ def _guess_teams(text: str) -> list[str]:
     found: list[str] = []
     for nation in _NATIONS:
         if re.search(rf"\b{re.escape(nation)}\b", text, re.IGNORECASE) and nation not in found:
+            found.append(nation)
+    # Resolve star-player names to their nation (e.g. "Neymar" -> "Brazil").
+    for player, nation in _PLAYER_NATION.items():
+        if re.search(rf"\b{re.escape(player)}\b", text, re.IGNORECASE) and nation not in found:
             found.append(nation)
     return found
 
