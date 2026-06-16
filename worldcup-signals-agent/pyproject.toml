@@ -1,0 +1,17 @@
+[project]
+name = "worldcup-signals-agent"
+version = "0.1.0"
+description = "Autonomous agent that collects World Cup signals via the last30days skill into DuckDB."
+requires-python = ">=3.10"
+dependencies = ["duckdb>=1.0", "pydantic>=2.6"]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.69"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+worldcup-agent = "worldcup_agent.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,10 @@
+# Core
+duckdb>=1.0
+pydantic>=2.6
+
+# Optional — only needed for LLM-based signal extraction (the agent falls back
+# to a deterministic heuristic extractor when this/the API key is absent).
+anthropic>=0.69
+
+# Dev
+pytest>=8.0
