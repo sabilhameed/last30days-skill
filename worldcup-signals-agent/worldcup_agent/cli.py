@@ -12,8 +12,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .agent import run_pipeline
-from .config import AgentConfig
+from .agent import run_fixtures, run_pipeline
+from .config import AgentConfig, load_fixtures
 from .store import SignalStore
 
 
@@ -78,6 +78,53 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_fixtures(args) -> int:
+    cfg = _config_from_args(args)
+    fixtures = load_fixtures(args.file)
+    if cfg.mock:
+        print("Mode: MOCK (engine fixtures, no network).")
+    elif not cfg.has_anthropic_key():
+        print("Note: no ANTHROPIC_API_KEY found — using heuristic extraction.")
+    print(f"Researching {len(fixtures)} fixtures from {args.file}\n")
+
+    summary = run_fixtures(cfg, fixtures)
+
+    print("\n=== Per-fixture intel ===")
+    # Index odds + signals by match for a combined readout.
+    by_match: dict[str, list[dict]] = {}
+    for s in summary.top_signals:
+        by_match.setdefault(s["match"], []).append(s)
+
+    for fx in fixtures:
+        sigs = by_match.get(fx.match, [])
+        odds = _format_odds(fx)
+        print(f"\n● {fx.match}   (reward: {odds})")
+        if not sigs:
+            print("    no prediction-relevant signals surfaced this run")
+            continue
+        for s in sorted(sigs, key=lambda x: -x["edge_score"]):
+            print(
+                f"    [{s['edge_score']}] {s['signal_type']} — favors "
+                f"{s['favored_team']} (conf={s['confidence']})"
+            )
+            print(f"        {s['rationale']}")
+
+    print(f"\nBatch {summary.batch_id}: {summary.total_signals} signals across "
+          f"{len(fixtures)} fixtures. DB rows: {summary.db_counts}")
+    return 0
+
+
+def _format_odds(fx) -> str:
+    parts = []
+    if fx.home_win is not None:
+        parts.append(f"{fx.home} {fx.home_win}")
+    if fx.draw is not None:
+        parts.append(f"draw {fx.draw}")
+    if fx.away_win is not None:
+        parts.append(f"{fx.away} {fx.away_win}")
+    return " / ".join(parts) if parts else "n/a"
+
+
 def cmd_board(args) -> int:
     cfg = _config_from_args(args)
     with SignalStore(cfg.db_path) as store:
@@ -128,6 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--no-llm", dest="no_llm", action="store_true", help="Heuristic extraction only.")
     p_run.add_argument("--depth", choices=["quick", "default", "deep"], help="Engine retrieval depth.")
     p_run.set_defaults(func=cmd_run)
+
+    p_fx = sub.add_parser("fixtures", help="Research a specific set of upcoming matches.")
+    _add_common(p_fx)
+    p_fx.add_argument("--file", default="fixtures.json", help="JSON file of fixtures to research.")
+    p_fx.add_argument("--mock", action="store_true", help="Use engine fixtures (offline).")
+    p_fx.add_argument("--no-llm", dest="no_llm", action="store_true", help="Heuristic extraction only.")
+    p_fx.add_argument("--depth", choices=["quick", "default", "deep"], help="Engine retrieval depth.")
+    p_fx.set_defaults(func=cmd_fixtures)
 
     p_board = sub.add_parser("board", help="Show the per-match edge board.")
     _add_common(p_board)

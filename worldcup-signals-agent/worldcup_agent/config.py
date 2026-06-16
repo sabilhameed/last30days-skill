@@ -7,6 +7,7 @@ Anthropic key comes from ANTHROPIC_API_KEY via the SDK's own resolution.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,32 @@ class ResearchAngle:
     signal_focus: str
     subreddits: tuple[str, ...] = ()
     x_related: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Fixture:
+    """A specific upcoming match to research.
+
+    `home_win` / `draw` / `away_win` are the reward points for a correct call
+    (lower = bookmaker favorite, higher = bigger payout for the upset). Optional
+    context the agent surfaces alongside its own signal-based lean.
+    """
+
+    home: str
+    away: str
+    home_win: float | None = None
+    draw: float | None = None
+    away_win: float | None = None
+
+    @property
+    def match(self) -> str:
+        return f"{self.home} vs {self.away}"
+
+    def topic(self) -> str:
+        return (
+            f"{self.home} vs {self.away} World Cup team news injuries "
+            "lineup form prediction preview"
+        )
 
 
 # The default angle set. Each maps to one engine run. Tuned to surface the
@@ -77,6 +104,23 @@ DEFAULT_ANGLES: tuple[ResearchAngle, ...] = (
         x_related=("Polymarket",),
     ),
 )
+
+
+def load_fixtures(path: Path | str) -> list[Fixture]:
+    """Load fixtures from a JSON file shaped like fixtures.json."""
+    data = json.loads(Path(path).read_text())
+    out: list[Fixture] = []
+    for f in data.get("fixtures", []):
+        out.append(
+            Fixture(
+                home=f["home"],
+                away=f["away"],
+                home_win=f.get("home_win"),
+                draw=f.get("draw"),
+                away_win=f.get("away_win"),
+            )
+        )
+    return out
 
 
 @dataclass

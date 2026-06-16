@@ -115,17 +115,29 @@ def _build_user_prompt(angle: ResearchAngle, items: list[dict]) -> str:
 
 
 def extract_with_llm(
-    cfg: AgentConfig, angle: ResearchAngle, items: list[dict]
+    cfg: AgentConfig,
+    angle: ResearchAngle,
+    items: list[dict],
+    match_context: tuple[str, list[str]] | None = None,
 ) -> list[PredictiveSignal]:
     """Use Claude structured outputs to extract signals. Raises on SDK errors."""
     import anthropic  # imported lazily so offline/mock runs don't need the dep
+
+    prompt = _build_user_prompt(angle, items)
+    if match_context is not None:
+        match, _ = match_context
+        prompt = (
+            f"All items below were collected to research the fixture: {match}. "
+            f"Tag every signal you extract to this match and assess which side it "
+            f"favors.\n\n" + prompt
+        )
 
     client = anthropic.Anthropic()
     response = client.messages.parse(
         model=cfg.model,
         max_tokens=4096,
         system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_user_prompt(angle, items)}],
+        messages=[{"role": "user", "content": prompt}],
         output_format=SignalExtraction,
     )
     parsed = response.parsed_output
@@ -323,19 +335,50 @@ def _guess_teams(text: str) -> list[str]:
     return found
 
 
+def apply_match_context(
+    signals: list[PredictiveSignal], match: str, teams: list[str]
+) -> list[PredictiveSignal]:
+    """Tie signals to a known fixture.
+
+    Used in fixtures mode: items were collected for one specific match, so every
+    signal belongs to it. We override 'unknown' match labels and make sure both
+    sides of the fixture appear in the signal's team list.
+    """
+    out: list[PredictiveSignal] = []
+    for s in signals:
+        merged = list(dict.fromkeys([*s.teams, *teams]))
+        out.append(s.model_copy(update={"match": match, "teams": merged}))
+    return out
+
+
 def extract_signals(
-    cfg: AgentConfig, angle: ResearchAngle, items: list[dict]
+    cfg: AgentConfig,
+    angle: ResearchAngle,
+    items: list[dict],
+    *,
+    match_context: tuple[str, list[str]] | None = None,
 ) -> tuple[list[PredictiveSignal], str]:
     """Extract signals, returning (signals, method).
 
     Prefers the LLM extractor; falls back to the heuristic on missing key,
-    disabled LLM, or SDK error.
+    disabled LLM, or SDK error. When `match_context` is given (fixtures mode),
+    signals are tagged to that match.
     """
     if not items:
         return [], "none"
+
+    signals: list[PredictiveSignal]
+    method: str
     if not cfg.no_llm and cfg.has_anthropic_key():
         try:
-            return extract_with_llm(cfg, angle, items), "llm"
+            signals, method = extract_with_llm(cfg, angle, items, match_context), "llm"
         except Exception as exc:  # noqa: BLE001 - fall back rather than crash the run
             print(f"  [extract] LLM extraction failed ({exc}); using heuristic.")
-    return extract_heuristic(angle, items), "heuristic"
+            signals, method = extract_heuristic(angle, items), "heuristic"
+    else:
+        signals, method = extract_heuristic(angle, items), "heuristic"
+
+    if match_context is not None:
+        match, teams = match_context
+        signals = apply_match_context(signals, match, teams)
+    return signals, method
